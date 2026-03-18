@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["Pillow"]
+# ///
 """
 Convert world_map_bw.png to a bitmask for the Mondeto smart contract.
 
@@ -12,11 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-try:
-    from PIL import Image
-except ImportError:
-    print("Error: Pillow is required. Install with: uv run --with Pillow", file=sys.stderr)
-    sys.exit(1)
+from PIL import Image
 
 THRESHOLD = 128  # below this = land (black), above = water (white)
 
@@ -61,7 +61,7 @@ def main():
 
     sol_path = script_dir / "land_mask.json"
     with open(sol_path, "w") as f:
-        json.dump(mask, f)
+        json.dump({"width": width, "height": height, "mask": mask}, f)
     print(f"Solidity-compatible mask written to {sol_path}", file=sys.stderr)
 
 
