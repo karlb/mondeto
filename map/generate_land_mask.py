@@ -59,15 +59,10 @@ def main():
     print(f"Image: {width}x{height} ({total_pixels} pixels, {len(mask)} words)", file=sys.stderr)
     print(f"Land pixels: {land_count} / {total_pixels}", file=sys.stderr)
 
-    # Output as JSON array of hex strings (for easy use in deploy scripts)
-    hex_values = [hex(w) for w in mask]
-    print(json.dumps(hex_values, indent=2))
-
-    # Also output Solidity-compatible format
     sol_path = script_dir / "land_mask.json"
     with open(sol_path, "w") as f:
         json.dump(mask, f)
-    print(f"\nSolidity-compatible mask written to {sol_path}", file=sys.stderr)
+    print(f"Solidity-compatible mask written to {sol_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":
