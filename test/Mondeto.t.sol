@@ -285,22 +285,30 @@ contract MondetoTest is Test {
         vm.prank(alice);
         mondeto.buyPixels(ids, 0xFF0000, "alice", "");
 
-        Mondeto.PixelView[] memory batch = mondeto.getPixelBatch(0, 0, 2, 1);
-        assertEq(batch.length, 2);
+        bytes memory batch = mondeto.getPixelBatch(0, 0, 2, 1);
+        assertEq(batch.length, 48); // 2 pixels * 24 bytes
 
-        // Pixel (0,0) — owned
-        assertEq(batch[0].id, 0);
-        assertEq(batch[0].owner, alice);
-        assertEq(batch[0].saleCount, 1);
-        assertEq(batch[0].color, 0xFF0000);
-        assertTrue(batch[0].isLand);
+        // Pixel (0,0) — owned by alice
+        address owner0;
+        uint8 sc0;
+        uint24 color0;
+        assembly {
+            let ptr := add(batch, 32)
+            owner0 := shr(96, mload(ptr))
+            sc0 := byte(0, mload(add(ptr, 20)))
+            color0 := or(or(shl(16, byte(0, mload(add(ptr, 21)))), shl(8, byte(0, mload(add(ptr, 22))))), byte(0, mload(add(ptr, 23))))
+        }
+        assertEq(owner0, alice);
+        assertEq(sc0, 1);
+        assertEq(color0, 0xFF0000);
 
         // Pixel (1,0) — unowned
-        assertEq(batch[1].id, 1);
-        assertEq(batch[1].owner, address(0));
-        assertEq(batch[1].saleCount, 0);
-        assertEq(batch[1].price, INITIAL_PRICE);
-        assertTrue(batch[1].isLand);
+        address owner1;
+        assembly {
+            let ptr := add(add(batch, 32), 24)
+            owner1 := shr(96, mload(ptr))
+        }
+        assertEq(owner1, address(0));
     }
 
     function test_rectanglePrice() public view {
@@ -375,15 +383,9 @@ contract MondetoTest is Test {
         mondeto.setLandMask(mask);
     }
 
-    function test_getPixelBatchIncludesIsLand() public view {
-        // Get batch spanning land and water pixels
-        // Pixels 0-299 are row 0. Pixels 0-1023 are land.
-        // Row 3 starts at pixel 900. Pixel 1024 = (124, 3).
-        // Get a batch at (123, 3) width 3 → pixels 1023, 1024, 1025
-        Mondeto.PixelView[] memory batch = mondeto.getPixelBatch(123, 3, 3, 1);
-        assertTrue(batch[0].isLand);   // pixel 1023
-        assertFalse(batch[1].isLand);  // pixel 1024
-        assertFalse(batch[2].isLand);  // pixel 1025
+    function test_getPixelBatchReturnsCorrectLength() public view {
+        bytes memory batch = mondeto.getPixelBatch(0, 0, 3, 1);
+        assertEq(batch.length, 72); // 3 pixels * 24 bytes
     }
 
     // ========== Upgrade ==========

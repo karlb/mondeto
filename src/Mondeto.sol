@@ -29,15 +29,6 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         bytes url;
     }
 
-    struct PixelView {
-        uint256 id;
-        address owner;
-        uint8 saleCount;
-        uint256 price;
-        uint24 color;
-        bool isLand;
-    }
-
     // --- State ---
     IERC20 public usdt;
     uint256 public deployTimestamp;
@@ -167,12 +158,14 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         return _isLand(pixelId(x, y));
     }
 
-    function getPixelBatch(uint16 x, uint16 y, uint16 w, uint16 h) external view returns (PixelView[] memory) {
+    /// @notice Returns pixel data for a rectangle. Each pixel is 24 bytes packed:
+    ///         [0:20] owner address, [20:21] saleCount, [21:24] color (uint24 big-endian)
+    function getPixelBatch(uint16 x, uint16 y, uint16 w, uint16 h) external view returns (bytes memory) {
         if (x + w > WIDTH || y + h > HEIGHT) revert OutOfBounds();
 
-        uint256 epoch = currentEpoch();
-        PixelView[] memory result = new PixelView[](uint256(w) * h);
-        uint256 idx;
+        uint256 count = uint256(w) * h;
+        bytes memory result = new bytes(count * 24);
+        uint256 offset;
         address cachedOwner;
         uint24 cachedColor;
 
@@ -181,6 +174,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
                 uint256 id = pixelId(col, row);
                 PixelData storage px = pixels[id];
                 address owner = px.owner;
+                uint8 sc = px.saleCount;
                 uint24 color;
                 if (owner != address(0)) {
                     if (owner != cachedOwner) {
@@ -189,15 +183,16 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
                     }
                     color = cachedColor;
                 }
-                result[idx] = PixelView({
-                    id: id,
-                    owner: owner,
-                    saleCount: px.saleCount,
-                    price: _price(px.saleCount, epoch),
-                    color: color,
-                    isLand: _isLand(id)
-                });
-                idx++;
+                assembly {
+                    let ptr := add(add(result, 32), offset)
+                    // Pack: 20-byte address | 1-byte saleCount | 3-byte color
+                    mstore(ptr, shl(96, owner))
+                    mstore8(add(ptr, 20), sc)
+                    mstore8(add(ptr, 21), shr(16, color))
+                    mstore8(add(ptr, 22), shr(8, color))
+                    mstore8(add(ptr, 23), color)
+                }
+                offset += 24;
             }
         }
         return result;
