@@ -67,10 +67,7 @@ Not all pixels are buyable. Water pixels (oceans) are excluded.
 
 ## Profile System
 
-Each address has one profile (color, label, url). There are two ways it gets set:
-
-1. `updateProfile()` — direct call, always overwrites.
-2. `buyPixels()` — **only** updates profile if at least one of `color`, `label`, or `url` is non-zero/non-empty. If all three are zero/empty, the existing profile is preserved. This lets users buy pixels without accidentally blanking their profile.
+Each address has one profile (color, label, url). Set via `updateProfile()`, which always overwrites. `buyPixels()` does not touch profiles.
 
 Label and URL are capped at 64 bytes each (not characters — matters for multibyte UTF-8).
 

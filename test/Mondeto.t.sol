@@ -67,7 +67,7 @@ contract MondetoTest is Test {
         uint256[] memory ids = new uint256[](1);
         ids[0] = 0;
         vm.prank(alice);
-        mondeto.buyPixels(ids, 0xFF0000, "", "");
+        mondeto.buyPixels(ids);
 
         // Price should now be doubled
         uint256 price = mondeto.priceOf(0, 0);
@@ -116,7 +116,7 @@ contract MondetoTest is Test {
         uint256[] memory ids = new uint256[](1);
         ids[0] = 0;
         vm.prank(alice);
-        mondeto.buyPixels(ids, 0xFF0000, "", "");
+        mondeto.buyPixels(ids);
 
         // saleCount=1, epoch=0 → price = initial << 1 = 200_000
         assertEq(mondeto.priceOf(0, 0), INITIAL_PRICE * 2);
@@ -139,7 +139,7 @@ contract MondetoTest is Test {
         uint256 contractBalBefore = usdt.balanceOf(address(mondeto));
 
         vm.prank(alice);
-        mondeto.buyPixels(ids, 0xFF0000, "alice", "https://alice.com");
+        mondeto.buyPixels(ids);
 
         // USDT went to contract (treasury)
         assertEq(usdt.balanceOf(address(mondeto)) - contractBalBefore, INITIAL_PRICE);
@@ -156,12 +156,12 @@ contract MondetoTest is Test {
 
         // Alice buys first
         vm.prank(alice);
-        mondeto.buyPixels(ids, 0xFF0000, "", "");
+        mondeto.buyPixels(ids);
 
         // Bob buys from alice
         uint256 aliceBalBefore = usdt.balanceOf(alice);
         vm.prank(bob);
-        mondeto.buyPixels(ids, 0x00FF00, "", "");
+        mondeto.buyPixels(ids);
 
         // Alice received payment (price was doubled)
         assertEq(usdt.balanceOf(alice) - aliceBalBefore, INITIAL_PRICE * 2);
@@ -177,12 +177,12 @@ contract MondetoTest is Test {
         ids[1] = 1;
 
         vm.prank(alice);
-        mondeto.buyPixels(ids, 0xFF0000, "", "");
+        mondeto.buyPixels(ids);
 
         // Bob bulk-buys both from alice — should aggregate into one transfer
         uint256 aliceBalBefore = usdt.balanceOf(alice);
         vm.prank(bob);
-        mondeto.buyPixels(ids, 0x00FF00, "", "");
+        mondeto.buyPixels(ids);
 
         assertEq(usdt.balanceOf(alice) - aliceBalBefore, INITIAL_PRICE * 2 * 2);
     }
@@ -193,7 +193,7 @@ contract MondetoTest is Test {
 
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Mondeto.InvalidPixelId.selector, 60_000));
-        mondeto.buyPixels(ids, 0, "", "");
+        mondeto.buyPixels(ids);
     }
 
     function test_revertOnWaterPixel() public {
@@ -203,7 +203,7 @@ contract MondetoTest is Test {
 
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Mondeto.NotLand.selector, 1024));
-        mondeto.buyPixels(ids, 0, "", "");
+        mondeto.buyPixels(ids);
     }
 
     function test_selfBuy() public {
@@ -212,12 +212,12 @@ contract MondetoTest is Test {
 
         // Alice buys pixel
         vm.prank(alice);
-        mondeto.buyPixels(ids, 0xFF0000, "", "");
+        mondeto.buyPixels(ids);
 
         // Alice buys her own pixel again
         uint256 aliceBalBefore = usdt.balanceOf(alice);
         vm.prank(alice);
-        mondeto.buyPixels(ids, 0xFF0000, "", "");
+        mondeto.buyPixels(ids);
 
         // safeTransferFrom(alice, alice, price) → net zero effect on balance
         (address pixelOwner, uint8 saleCount) = mondeto.pixels(0);
@@ -238,37 +238,6 @@ contract MondetoTest is Test {
         assertEq(url, bytes("https://alice.com"));
     }
 
-    function test_buyUpdatesProfile() public {
-        uint256[] memory ids = new uint256[](1);
-        ids[0] = 0;
-
-        vm.prank(alice);
-        mondeto.buyPixels(ids, 0xFF0000, "alice", "https://alice.com");
-
-        (uint24 color, bytes memory label, bytes memory url) = mondeto.profiles(alice);
-        assertEq(color, 0xFF0000);
-        assertEq(label, bytes("alice"));
-        assertEq(url, bytes("https://alice.com"));
-    }
-
-    function test_buyPreservesProfileWhenZero() public {
-        // Set profile first
-        vm.prank(alice);
-        mondeto.updateProfile(0xFF0000, "alice", "https://alice.com");
-
-        // Buy with zero/empty profile values
-        uint256[] memory ids = new uint256[](1);
-        ids[0] = 0;
-        vm.prank(alice);
-        mondeto.buyPixels(ids, 0, "", "");
-
-        // Profile should be preserved
-        (uint24 color, bytes memory label, bytes memory url) = mondeto.profiles(alice);
-        assertEq(color, 0xFF0000);
-        assertEq(label, bytes("alice"));
-        assertEq(url, bytes("https://alice.com"));
-    }
-
     function test_revertOnLabelTooLong() public {
         bytes memory longLabel = new bytes(65);
         vm.prank(alice);
@@ -283,24 +252,16 @@ contract MondetoTest is Test {
         mondeto.updateProfile(0, "", string(longUrl));
     }
 
-    function test_buyRevertsOnLabelTooLong() public {
-        uint256[] memory ids = new uint256[](1);
-        ids[0] = 0;
-        bytes memory longLabel = new bytes(65);
-
-        vm.prank(alice);
-        vm.expectRevert(Mondeto.LabelTooLong.selector);
-        mondeto.buyPixels(ids, 0xFF0000, string(longLabel), "");
-    }
-
     // ========== Views ==========
 
     function test_getPixelBatch() public {
-        // Buy pixel (0,0)
+        // Set profile and buy pixel (0,0)
         uint256[] memory ids = new uint256[](1);
         ids[0] = 0;
-        vm.prank(alice);
-        mondeto.buyPixels(ids, 0xFF0000, "alice", "");
+        vm.startPrank(alice);
+        mondeto.updateProfile(0xFF0000, "alice", "");
+        mondeto.buyPixels(ids);
+        vm.stopPrank();
 
         bytes memory batch = mondeto.getPixelBatch(0, 0, 2, 1);
         assertEq(batch.length, 48); // 2 pixels * 24 bytes
@@ -418,7 +379,7 @@ contract MondetoTest is Test {
         uint256[] memory ids = new uint256[](1);
         ids[0] = 0;
         vm.prank(alice);
-        mondeto.buyPixels(ids, 0xFF0000, "alice", "");
+        mondeto.buyPixels(ids);
 
         // Deploy V2 and upgrade
         MondetoV2 v2Impl = new MondetoV2();
@@ -455,7 +416,7 @@ contract MondetoTest is Test {
 
         for (uint8 i; i < buys; ++i) {
             vm.prank(i % 2 == 0 ? alice : bob);
-            mondeto.buyPixels(ids, 0xFF0000, "", "");
+            mondeto.buyPixels(ids);
         }
 
         // Warp to fuzzed time and verify priceOf doesn't revert
@@ -471,7 +432,7 @@ contract MondetoTest is Test {
         ids[0] = pixelIdx;
 
         vm.prank(alice);
-        mondeto.buyPixels(ids, 0xFF0000, "", "");
+        mondeto.buyPixels(ids);
 
         (address pixelOwner,) = mondeto.pixels(pixelIdx);
         assertEq(pixelOwner, alice);
@@ -489,7 +450,7 @@ contract MondetoTest is Test {
         // Buy 256 times alternating alice and bob
         for (uint256 i; i < 256; ++i) {
             vm.prank(i % 2 == 0 ? alice : bob);
-            mondeto.buyPixels(ids, 0xFF0000, "", "");
+            mondeto.buyPixels(ids);
         }
 
         // saleCount should saturate at 255, not wrap to 0

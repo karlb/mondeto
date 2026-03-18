@@ -87,14 +87,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
 
     // --- Core ---
 
-    function buyPixels(
-        uint256[] calldata ids,
-        uint24 color,
-        string calldata label,
-        string calldata url
-    ) external nonReentrant {
-        _validateProfile(label, url);
-
+    function buyPixels(uint256[] calldata ids) external nonReentrant {
         uint256 elapsed = block.timestamp - deployTimestamp;
         uint256 totalCost;
 
@@ -156,11 +149,6 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         for (uint256 i; i < recipientCount;) {
             usdt.safeTransferFrom(msg.sender, recipients[i], amounts[i]);
             unchecked { ++i; }
-        }
-
-        // Conditionally update profile
-        if (color != 0 || bytes(label).length > 0 || bytes(url).length > 0) {
-            _setProfile(msg.sender, color, label, url);
         }
 
         emit PixelsPurchased(msg.sender, ids, totalCost);
