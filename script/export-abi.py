@@ -82,10 +82,16 @@ def main():
     artifact = json.loads(artifact_path.read_text())
     abi = artifact["abi"]
 
-    # Read .env for addresses
+    # Read proxy address from latest Deploy broadcast (transactions[1] is the ERC1967Proxy)
+    # Read USDT address from .env
     env = read_env(ROOT / ".env")
-    proxy = env.get("PROXY_ADDRESS", "0x" + "0" * 40)
     usdt = env.get("USDT_ADDRESS", "0x" + "0" * 40)
+    broadcast_glob = sorted((ROOT / "broadcast" / "Deploy.s.sol").glob("*/run-latest.json"))
+    if broadcast_glob:
+        broadcast = json.loads(broadcast_glob[-1].read_text())
+        proxy = broadcast["transactions"][1]["contractAddress"]
+    else:
+        proxy = "0x" + "0" * 40
 
     # Format ABI as indented JSON, then wrap in TS
     abi_json = json.dumps(abi, indent=2)
