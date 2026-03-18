@@ -6,7 +6,13 @@ import {Mondeto} from "../src/Mondeto.sol";
 
 contract UpgradeScript is Script {
     function run() external {
-        address proxy = vm.envAddress("PROXY_ADDRESS");
+        string memory broadcastPath = string.concat(
+            "broadcast/Deploy.s.sol/",
+            vm.toString(block.chainid),
+            "/run-latest.json"
+        );
+        string memory json = vm.readFile(broadcastPath);
+        address proxy = vm.parseJsonAddress(json, ".transactions[1].contractAddress");
         Mondeto current = Mondeto(proxy);
 
         vm.startBroadcast();
