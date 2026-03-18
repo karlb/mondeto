@@ -1,6 +1,6 @@
 # Mondeto
 
-A 300x200 pixel world map on Celo where every land pixel is ownable on-chain. Pixels are colored by owner, creating a territorial mosaic. Uses USDT as currency, targets MiniPay.
+A 170x100 pixel world map on Celo where every land pixel is ownable on-chain. Pixels are colored by owner, creating a territorial mosaic. Uses USDT as currency, targets MiniPay.
 
 ## Build & Test
 
@@ -32,13 +32,15 @@ cd map && uv run convert_map.py
 ## Price Formula — The Most Subtle Part
 
 ```
-price = initialPrice << (saleCount - epoch)    when saleCount >= epoch
-price = initialPrice >> (epoch - saleCount)    when saleCount < epoch, floored at minPrice
+discretePrice = initialPrice << (saleCount - epoch)    when saleCount >= epoch
+discretePrice = initialPrice >> (epoch - saleCount)    when saleCount < epoch, floored at minPrice
 ```
 
-**Why relative epoch matters**: `epoch = (block.timestamp - deployTimestamp) / HALF_YEAR`. If you used absolute `block.timestamp / HALF_YEAR`, epoch would be ~108+ at deploy time, making all pixels nearly free immediately. The relative epoch starts at 0 and increments every 182 days after deploy.
+The actual price linearly interpolates between adjacent discrete price levels within each epoch, so decay is gradual rather than a hard step every `HALVING_TIME`. At epoch boundaries the interpolated price equals the discrete price.
 
-**What this means economically**: Each sale doubles the price. Every 182 days without a sale, the price halves. A pixel bought once (saleCount=1) returns to `initialPrice` after one epoch, then keeps halving. This creates a natural "use it or lose it" pressure — land you buy will decay in value toward `minPrice` if nobody re-buys it.
+**Why relative epoch matters**: `epoch = (block.timestamp - deployTimestamp) / HALVING_TIME`. If you used absolute `block.timestamp / HALVING_TIME`, epoch would be ~108+ at deploy time, making all pixels nearly free immediately. The relative epoch starts at 0 and increments every `HALVING_TIME` after deploy.
+
+**What this means economically**: Each sale doubles the price. Over each `HALVING_TIME` (currently 182 days) without a sale, the price gradually halves. A pixel bought once (saleCount=1) returns to `initialPrice` after one epoch, then keeps decaying. This creates a natural "use it or lose it" pressure — land you buy will decay in value toward `minPrice` if nobody re-buys it.
 
 **`setInitialPrice` is retroactive**: Changing `initialPrice` changes the price of ALL pixels instantly, since it's the base of every price calculation. This is intentional but dangerous — use with care.
 
@@ -58,11 +60,10 @@ Not all pixels are buyable. Water pixels (oceans) are excluded.
 - `map/Blank_world_map_Equal_Earth_projection.svg` is the upstream source (Wikipedia Equal Earth projection).
 - `map/convert_map.py` renders the SVG to `map/world_map_bw.png` (grayscale threshold, crop empty columns). Countries are gray #c0c0c0 in the SVG; the script thresholds at brightness > 240 to separate land from ocean.
 - `map/world_map_bw.png` is the working source of truth. Black = land, white = water.
-- `map/generate_land_mask.py` converts the PNG to 235 `uint256` words (60,000 bits packed). Threshold: brightness < 128.
+- `map/generate_land_mask.py` reads the PNG dimensions and converts to `uint256` words (170×100 = 17,000 bits → 67 words). Threshold: brightness < 128.
 - Bit packing: pixel ID `n` is bit `n % 256` of word `n / 256`.
-- `setLandMask()` costs ~4.7M gas — call once after deploy.
-- The mask is **mutable** by the owner. If you update `world_map_bw.png`, regenerate and re-set.
-- Currently 19,818 land pixels out of 60,000.
+- The land mask is passed to `initialize()` at deploy time and is immutable after that.
+- Currently 5,622 land pixels out of 17,000.
 
 ## Profile System
 
@@ -80,17 +81,19 @@ Label and URL are capped at 64 bytes each (not characters — matters for multib
 USDT_ADDRESS=0x...     # Celo USDT contract
 INITIAL_PRICE=100000   # 0.10 USDT (6 decimals)
 MIN_PRICE=1            # 0.000001 USDT
+WIDTH=170
+HEIGHT=100
 
 forge script script/Deploy.s.sol --rpc-url celo --broadcast
 ```
 
-After deploy, call `setLandMask()` with the data from `map/land_mask.json`. The deploy script has a placeholder for this — you need to wire it up or call it separately via cast.
+The deploy script reads the land mask from `map/land_mask.json` and passes it to `initialize()` along with dimensions.
 
 ## Upgrade Checklist
 
 1. New contract must inherit from `Mondeto` (or replicate its storage layout exactly)
 2. **Never reorder or remove existing state variables** — only append new ones after `landMask`
-3. Constants (`WIDTH`, `HEIGHT`, etc.) are fine — they compile into bytecode, not storage
+3. `WIDTH`, `HEIGHT`, `TOTAL_PIXELS`, `LAND_MASK_LENGTH` are immutable (baked into implementation bytecode) — new implementation must be deployed with the same constructor args
 4. `usdt` and `deployTimestamp` are regular storage (not `immutable`) because of the proxy pattern
 5. Test the upgrade in a fork before mainnet: deploy V2, call `upgradeToAndCall`, verify old state survives
 

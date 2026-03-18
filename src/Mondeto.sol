@@ -11,7 +11,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // --- Constants ---
-    uint256 public constant HALF_YEAR = 182 days;
+    uint256 public constant HALVING_TIME = 182 days;
 
     // --- Immutables (set in constructor, baked into implementation bytecode) ---
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
@@ -97,7 +97,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     ) external nonReentrant {
         _validateProfile(label, url);
 
-        uint256 epoch = currentEpoch();
+        uint256 elapsed = block.timestamp - deployTimestamp;
         uint256 totalCost;
 
         // Temporary aggregation arrays — worst case each pixel has unique owner
@@ -111,7 +111,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
             if (!_isLand(id)) revert NotLand(id);
 
             PixelData storage px = pixels[id];
-            uint256 price = _price(px.saleCount, epoch);
+            uint256 price = _price(px.saleCount, elapsed);
             totalCost += price;
 
             address prevOwner = px.owner;
@@ -160,7 +160,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     // --- Views ---
 
     function currentEpoch() public view returns (uint256) {
-        return (block.timestamp - deployTimestamp) / HALF_YEAR;
+        return (block.timestamp - deployTimestamp) / HALVING_TIME;
     }
 
     function pixelId(uint16 x, uint16 y) public view returns (uint256) {
@@ -170,7 +170,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     function priceOf(uint16 x, uint16 y) external view returns (uint256) {
         if (x >= WIDTH || y >= HEIGHT) revert InvalidCoordinates();
         uint256 id = pixelId(x, y);
-        return _price(pixels[id].saleCount, currentEpoch());
+        return _price(pixels[id].saleCount, block.timestamp - deployTimestamp);
     }
 
     function isLand(uint16 x, uint16 y) external view returns (bool) {
@@ -230,24 +230,24 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     function rectanglePrice(uint16 x, uint16 y, uint16 w, uint16 h) external view returns (uint256) {
         if (x + w > WIDTH || y + h > HEIGHT) revert OutOfBounds();
 
-        uint256 epoch = currentEpoch();
+        uint256 elapsed = block.timestamp - deployTimestamp;
         uint256 total;
 
         for (uint16 row = y; row < y + h; ++row) {
             for (uint16 col = x; col < x + w; ++col) {
                 uint256 id = pixelId(col, row);
-                total += _price(pixels[id].saleCount, epoch);
+                total += _price(pixels[id].saleCount, elapsed);
             }
         }
         return total;
     }
 
     function selectionPrice(uint256[] calldata ids) external view returns (uint256) {
-        uint256 epoch = currentEpoch();
+        uint256 elapsed = block.timestamp - deployTimestamp;
         uint256 total;
         for (uint256 i; i < ids.length; ++i) {
             if (ids[i] >= TOTAL_PIXELS) revert InvalidPixelId(ids[i]);
-            total += _price(pixels[ids[i]].saleCount, epoch);
+            total += _price(pixels[ids[i]].saleCount, elapsed);
         }
         return total;
     }
@@ -277,7 +277,21 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         emit ProfileUpdated(user, color, bytes(label), bytes(url));
     }
 
-    function _price(uint8 saleCount, uint256 epoch) internal view returns (uint256) {
+    function _price(uint8 saleCount, uint256 elapsed) internal view returns (uint256) {
+        uint256 epochStart = elapsed / HALVING_TIME;
+        uint256 remainder = elapsed % HALVING_TIME;
+
+        uint256 pStart = _discretePrice(saleCount, epochStart);
+        if (remainder == 0) return pStart;
+        if (pStart == type(uint256).max) return type(uint256).max;
+
+        uint256 pEnd = _discretePrice(saleCount, epochStart + 1);
+
+        // Linear interpolation between adjacent power-of-2 price levels
+        return pStart - (pStart - pEnd) * remainder / HALVING_TIME;
+    }
+
+    function _discretePrice(uint8 saleCount, uint256 epoch) internal view returns (uint256) {
         if (saleCount >= epoch) {
             uint256 shift = saleCount - epoch;
             if (shift >= 128) return type(uint256).max;

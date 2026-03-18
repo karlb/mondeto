@@ -82,6 +82,27 @@ contract MondetoTest is Test {
         assertEq(price, INITIAL_PRICE / 2);
     }
 
+    function test_priceDecaysGradually() public {
+        // At epoch 0: price = INITIAL_PRICE
+        uint256 priceStart = mondeto.priceOf(0, 0);
+        assertEq(priceStart, INITIAL_PRICE);
+
+        // At 25% through epoch: price should be 75% of the way from start to end
+        // (linear interp from INITIAL_PRICE to INITIAL_PRICE/2)
+        vm.warp(block.timestamp + 182 days / 4);
+        uint256 priceQuarter = mondeto.priceOf(0, 0);
+        assertEq(priceQuarter, INITIAL_PRICE - (INITIAL_PRICE - INITIAL_PRICE / 2) / 4);
+
+        // At 50% through epoch: midpoint between INITIAL_PRICE and INITIAL_PRICE/2
+        vm.warp(block.timestamp - 182 days / 4 + 182 days / 2);
+        uint256 priceHalf = mondeto.priceOf(0, 0);
+        assertEq(priceHalf, INITIAL_PRICE - (INITIAL_PRICE - INITIAL_PRICE / 2) / 2);
+
+        // Price should be strictly decreasing
+        assertGt(priceStart, priceQuarter);
+        assertGt(priceQuarter, priceHalf);
+    }
+
     function test_priceFloorsAtMinPrice() public {
         // Warp forward many epochs
         vm.warp(block.timestamp + 182 days * 200);
