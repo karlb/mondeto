@@ -89,7 +89,11 @@ def main():
     broadcast_glob = sorted((ROOT / "broadcast" / "Deploy.s.sol").glob("*/run-latest.json"))
     if broadcast_glob:
         broadcast = json.loads(broadcast_glob[-1].read_text())
-        proxy = broadcast["transactions"][1]["contractAddress"]
+        proxy_txn = next(
+            t for t in broadcast["transactions"]
+            if t.get("contractName") == "ERC1967Proxy" and t.get("transactionType") == "CREATE"
+        )
+        proxy = proxy_txn["contractAddress"]
     else:
         proxy = "0x" + "0" * 40
 

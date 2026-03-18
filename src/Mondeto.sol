@@ -12,6 +12,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
 
     // --- Constants ---
     uint256 public constant HALVING_TIME = 182 days;
+    uint256 public constant DEFAULT_FEE_RATE = 300; // 3% in basis points
 
     // --- Immutables (set in constructor, baked into implementation bytecode) ---
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
@@ -83,7 +84,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         deployTimestamp = block.timestamp;
         initialPrice = _initialPrice;
         minPrice = _minPrice;
-        feeRate = 300; // 3%
+        feeRate = DEFAULT_FEE_RATE;
 
         landMask = _landMask;
     }
@@ -201,6 +202,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     function priceOf(uint16 x, uint16 y) external view returns (uint256) {
         if (x >= WIDTH || y >= HEIGHT) revert InvalidCoordinates();
         uint256 id = pixelId(x, y);
+        if (!_isLand(id)) revert NotLand(id);
         return _price(pixels[id].saleCount, block.timestamp - deployTimestamp, initialPrice, minPrice);
     }
 
