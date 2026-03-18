@@ -163,8 +163,10 @@ contract MondetoTest is Test {
         vm.prank(bob);
         mondeto.buyPixels(ids);
 
-        // Alice received payment (price was doubled)
-        assertEq(usdt.balanceOf(alice) - aliceBalBefore, INITIAL_PRICE * 2);
+        // Alice received payment (price was doubled), minus 3% fee to contract
+        uint256 price = INITIAL_PRICE * 2;
+        uint256 fee = price * 300 / 10000;
+        assertEq(usdt.balanceOf(alice) - aliceBalBefore, price - fee);
 
         (address pixelOwner,) = mondeto.pixels(0);
         assertEq(pixelOwner, bob);
@@ -184,7 +186,10 @@ contract MondetoTest is Test {
         vm.prank(bob);
         mondeto.buyPixels(ids);
 
-        assertEq(usdt.balanceOf(alice) - aliceBalBefore, INITIAL_PRICE * 2 * 2);
+        // Alice received aggregated payment for both pixels, minus 3% fee each
+        uint256 totalPrice = INITIAL_PRICE * 2 * 2;
+        uint256 totalFee = totalPrice * 300 / 10000;
+        assertEq(usdt.balanceOf(alice) - aliceBalBefore, totalPrice - totalFee);
     }
 
     function test_revertOnInvalidPixelId() public {
@@ -219,11 +224,13 @@ contract MondetoTest is Test {
         vm.prank(alice);
         mondeto.buyPixels(ids);
 
-        // safeTransferFrom(alice, alice, price) → net zero effect on balance
+        // Alice pays full price but only receives price - fee back; fee goes to contract
+        uint256 price = INITIAL_PRICE * 2;
+        uint256 fee = price * 300 / 10000;
         (address pixelOwner, uint8 saleCount) = mondeto.pixels(0);
         assertEq(pixelOwner, alice);
         assertEq(saleCount, 2);
-        assertEq(usdt.balanceOf(alice), aliceBalBefore); // net zero
+        assertEq(usdt.balanceOf(alice), aliceBalBefore - fee);
     }
 
     // ========== Profile ==========

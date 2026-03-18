@@ -44,6 +44,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     mapping(uint256 => PixelData) public pixels;
     mapping(address => OwnerProfile) public profiles;
     uint256[] public landMask;
+    uint256 public feeRate; // basis points (e.g. 300 = 3%); fee goes to contract treasury
 
     // --- Events ---
     event PixelsPurchased(address indexed buyer, uint256[] ids, uint256 totalCost);
@@ -57,6 +58,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     error LabelTooLong();
     error UrlTooLong();
     error InvalidMaskLength();
+    error InvalidFeeRate();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(uint16 _width, uint16 _height) {
@@ -81,6 +83,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         deployTimestamp = block.timestamp;
         initialPrice = _initialPrice;
         minPrice = _minPrice;
+        feeRate = 300; // 3%
 
         landMask = _landMask;
     }
@@ -89,12 +92,15 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
 
     function buyPixels(uint256[] calldata ids) external nonReentrant {
         uint256 elapsed = block.timestamp - deployTimestamp;
+        uint256 _feeRate = feeRate;
         uint256 totalCost;
 
-        // Temporary aggregation arrays — worst case each pixel has unique owner
-        address[] memory recipients = new address[](ids.length);
-        uint256[] memory amounts = new uint256[](ids.length);
-        uint256 recipientCount;
+        // Index 0 is reserved for address(this) (unowned pixel proceeds + fees).
+        // Worst case: each pixel has a unique previous owner → ids.length + 1 slots.
+        address[] memory recipients = new address[](ids.length + 1);
+        uint256[] memory amounts = new uint256[](ids.length + 1);
+        uint256 recipientCount = 1;
+        recipients[0] = address(this);
 
         // Cache landMask word to avoid repeated SLOADs for consecutive pixel IDs
         uint256 cachedWordIdx = type(uint256).max;
@@ -120,21 +126,28 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
             uint256 price = _price(sc, elapsed, initialPrice, minPrice);
             totalCost += price;
 
-            address recipient = prevOwner == address(0) ? address(this) : prevOwner;
+            if (prevOwner == address(0)) {
+                // Unowned: full price to treasury
+                amounts[0] += price;
+            } else {
+                // Owned: deduct fee, pay remainder to previous owner
+                uint256 fee = price * _feeRate / 10000;
+                amounts[0] += fee;
+                uint256 ownerAmount = price - fee;
 
-            // Aggregate payment
-            bool found;
-            for (uint256 j; j < recipientCount; ++j) {
-                if (recipients[j] == recipient) {
-                    amounts[j] += price;
-                    found = true;
-                    break;
+                bool found;
+                for (uint256 j = 1; j < recipientCount; ++j) {
+                    if (recipients[j] == prevOwner) {
+                        amounts[j] += ownerAmount;
+                        found = true;
+                        break;
+                    }
                 }
-            }
-            if (!found) {
-                recipients[recipientCount] = recipient;
-                amounts[recipientCount] = price;
-                recipientCount++;
+                if (!found) {
+                    recipients[recipientCount] = prevOwner;
+                    amounts[recipientCount] = ownerAmount;
+                    ++recipientCount;
+                }
             }
 
             // Update pixel state
@@ -148,7 +161,9 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
 
         // Execute transfers
         for (uint256 i; i < recipientCount;) {
-            usdt.safeTransferFrom(msg.sender, recipients[i], amounts[i]);
+            if (amounts[i] > 0) {
+                usdt.safeTransferFrom(msg.sender, recipients[i], amounts[i]);
+            }
             unchecked { ++i; }
         }
 
@@ -197,9 +212,10 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         uint256 halvingTime,
         uint256 _initialPrice,
         uint256 _minPrice,
-        uint256 _deployTimestamp
+        uint256 _deployTimestamp,
+        uint256 _feeRate
     ) {
-        return (WIDTH, HEIGHT, HALVING_TIME, initialPrice, minPrice, deployTimestamp);
+        return (WIDTH, HEIGHT, HALVING_TIME, initialPrice, minPrice, deployTimestamp, feeRate);
     }
 
     /// @notice Returns packed pixel data for land pixels in a rectangle. Water pixels are skipped.
@@ -352,6 +368,11 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
 
     function setInitialPrice(uint256 _initialPrice) external onlyOwner {
         initialPrice = _initialPrice;
+    }
+
+    function setFeeRate(uint256 _feeRate) external onlyOwner {
+        if (_feeRate > 10000) revert InvalidFeeRate();
+        feeRate = _feeRate;
     }
 
     // --- Internal ---
