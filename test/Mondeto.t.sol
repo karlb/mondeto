@@ -7,7 +7,7 @@ import {Mondeto} from "../src/Mondeto.sol";
 import {MockUSDT} from "./mocks/MockUSDT.sol";
 
 // Minimal V2 for upgrade test
-contract MondetoV2 is Mondeto {
+contract MondetoV2 is Mondeto(300, 200) {
     function version() external pure returns (uint256) {
         return 2;
     }
@@ -27,23 +27,21 @@ contract MondetoTest is Test {
     function setUp() public {
         usdt = new MockUSDT();
 
-        // Deploy implementation + proxy
-        Mondeto impl = new Mondeto();
-        bytes memory initData = abi.encodeCall(
-            Mondeto.initialize,
-            (address(usdt), INITIAL_PRICE, MIN_PRICE)
-        );
-        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
-        mondeto = Mondeto(address(proxy));
-
-        // Set a simple land mask: mark pixels 0-999 and some specific ones as land
+        // Land mask: mark pixels 0-1023 as land (first 4 words fully set)
         uint256[] memory mask = new uint256[](235);
-        // Set first 4 words fully (pixels 0-1023)
         mask[0] = type(uint256).max;
         mask[1] = type(uint256).max;
         mask[2] = type(uint256).max;
         mask[3] = type(uint256).max;
-        mondeto.setLandMask(mask);
+
+        // Deploy implementation + proxy
+        Mondeto impl = new Mondeto(300, 200);
+        bytes memory initData = abi.encodeCall(
+            Mondeto.initialize,
+            (address(usdt), INITIAL_PRICE, MIN_PRICE, mask)
+        );
+        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
+        mondeto = Mondeto(address(proxy));
 
         // Fund accounts
         usdt.mint(alice, 1_000_000e6); // 1M USDT
@@ -200,8 +198,6 @@ contract MondetoTest is Test {
         vm.prank(alice);
         mondeto.buyPixels(ids, 0xFF0000, "", "");
 
-        // Alice paid herself the doubled price — net: price deducted by safeTransferFrom then received back
-        // Actually: she pays herself, so balance should decrease by 0 net? No — the transfer is from alice to alice.
         // safeTransferFrom(alice, alice, price) → net zero effect on balance
         (address pixelOwner, uint8 saleCount) = mondeto.pixels(0);
         assertEq(pixelOwner, alice);
@@ -370,17 +366,16 @@ contract MondetoTest is Test {
         assertFalse(mondeto.isLand(124, 3));
     }
 
-    function test_setLandMaskOnlyOwner() public {
-        uint256[] memory mask = new uint256[](235);
-        vm.prank(alice);
-        vm.expectRevert();
-        mondeto.setLandMask(mask);
-    }
-
-    function test_setLandMaskInvalidLength() public {
-        uint256[] memory mask = new uint256[](100);
+    function test_initializeRejectsInvalidMaskLength() public {
+        MockUSDT usdt2 = new MockUSDT();
+        Mondeto impl = new Mondeto(300, 200);
+        uint256[] memory badMask = new uint256[](100);
+        bytes memory initData = abi.encodeCall(
+            Mondeto.initialize,
+            (address(usdt2), INITIAL_PRICE, MIN_PRICE, badMask)
+        );
         vm.expectRevert(Mondeto.InvalidMaskLength.selector);
-        mondeto.setLandMask(mask);
+        new ERC1967Proxy(address(impl), initData);
     }
 
     function test_getPixelBatchSkipsWater() public view {
@@ -392,8 +387,9 @@ contract MondetoTest is Test {
     // ========== Upgrade ==========
 
     function test_cannotInitializeTwice() public {
+        uint256[] memory mask = new uint256[](235);
         vm.expectRevert();
-        mondeto.initialize(address(usdt), INITIAL_PRICE, MIN_PRICE);
+        mondeto.initialize(address(usdt), INITIAL_PRICE, MIN_PRICE, mask);
     }
 
     function test_upgradeToV2() public {
@@ -428,11 +424,9 @@ contract MondetoTest is Test {
     // ========== Fuzz ==========
 
     function testFuzz_priceNeverReverts(uint8 saleCount, uint64 timeElapsed) public {
-        // Buy pixel saleCount times to set its sale count, then warp and check price
         uint256[] memory ids = new uint256[](1);
         ids[0] = 0;
 
-        // Bound saleCount to something feasible for a loop
         uint8 buys = uint8(bound(saleCount, 0, 10));
 
         // Warp far into the future so each buy costs minPrice
@@ -465,15 +459,6 @@ contract MondetoTest is Test {
     // ========== saleCount saturation ==========
 
     function test_saleCountSaturatesAt255() public {
-        // Directly set saleCount high by repeated buys
-        // For efficiency, we'll buy and sell between alice and bob many times
-        // But that's expensive. Instead, let's test the boundary:
-        // We'll manipulate storage directly for the test
-
-        // Set saleCount to 254 via vm.store
-        // PixelData is at mapping slot: keccak256(abi.encode(pixelId, slot))
-        // pixels mapping is at slot... let's just buy a couple times and check increment
-
         uint256[] memory ids = new uint256[](1);
         ids[0] = 0;
 

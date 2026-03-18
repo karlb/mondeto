@@ -11,11 +11,17 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // --- Constants ---
-    uint16 public constant WIDTH = 300;
-    uint16 public constant HEIGHT = 200;
-    uint256 public constant TOTAL_PIXELS = 60_000;
     uint256 public constant HALF_YEAR = 182 days;
-    uint256 public constant LAND_MASK_LENGTH = 235;
+
+    // --- Immutables (set in constructor, baked into implementation bytecode) ---
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
+    uint16 public immutable WIDTH;
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
+    uint16 public immutable HEIGHT;
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
+    uint256 public immutable TOTAL_PIXELS;
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
+    uint256 public immutable LAND_MASK_LENGTH;
 
     // --- Structs ---
     struct PixelData {
@@ -37,12 +43,11 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
 
     mapping(uint256 => PixelData) public pixels;
     mapping(address => OwnerProfile) public profiles;
-    uint256[235] public landMask;
+    uint256[] public landMask;
 
     // --- Events ---
     event PixelsPurchased(address indexed buyer, uint256[] ids, uint256 totalCost);
     event ProfileUpdated(address indexed user, uint24 color, bytes label, bytes url);
-    event LandMaskSet();
 
     // --- Errors ---
     error InvalidPixelId(uint256 id);
@@ -54,17 +59,32 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     error InvalidMaskLength();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
+    constructor(uint16 _width, uint16 _height) {
+        WIDTH = _width;
+        HEIGHT = _height;
+        TOTAL_PIXELS = uint256(_width) * _height;
+        LAND_MASK_LENGTH = (TOTAL_PIXELS + 255) / 256;
         _disableInitializers();
     }
 
-    function initialize(address _usdt, uint256 _initialPrice, uint256 _minPrice) external initializer {
+    function initialize(
+        address _usdt,
+        uint256 _initialPrice,
+        uint256 _minPrice,
+        uint256[] calldata _landMask
+    ) external initializer {
         __Ownable_init(msg.sender);
+
+        if (_landMask.length != LAND_MASK_LENGTH) revert InvalidMaskLength();
 
         usdt = IERC20(_usdt);
         deployTimestamp = block.timestamp;
         initialPrice = _initialPrice;
         minPrice = _minPrice;
+
+        for (uint256 i; i < _landMask.length; ++i) {
+            landMask.push(_landMask[i]);
+        }
     }
 
     // --- Core ---
@@ -143,7 +163,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         return (block.timestamp - deployTimestamp) / HALF_YEAR;
     }
 
-    function pixelId(uint16 x, uint16 y) public pure returns (uint256) {
+    function pixelId(uint16 x, uint16 y) public view returns (uint256) {
         return uint256(y) * WIDTH + x;
     }
 
@@ -233,14 +253,6 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     }
 
     // --- Admin ---
-
-    function setLandMask(uint256[] calldata mask) external onlyOwner {
-        if (mask.length != LAND_MASK_LENGTH) revert InvalidMaskLength();
-        for (uint256 i; i < LAND_MASK_LENGTH; ++i) {
-            landMask[i] = mask[i];
-        }
-        emit LandMaskSet();
-    }
 
     function withdraw(address to, uint256 amount) external onlyOwner {
         usdt.safeTransfer(to, amount);

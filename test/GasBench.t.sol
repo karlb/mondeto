@@ -18,15 +18,15 @@ contract GasBench is Test {
 
     function setUp() public {
         usdt = new MockUSDT();
-        Mondeto impl = new Mondeto();
-        bytes memory initData = abi.encodeCall(Mondeto.initialize, (address(usdt), INITIAL_PRICE, MIN_PRICE));
-        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
-        mondeto = Mondeto(address(proxy));
 
         // All pixels are land for buy benchmarks
         uint256[] memory mask = new uint256[](235);
         for (uint256 i; i < 235; ++i) mask[i] = type(uint256).max;
-        mondeto.setLandMask(mask);
+
+        Mondeto impl = new Mondeto(300, 200);
+        bytes memory initData = abi.encodeCall(Mondeto.initialize, (address(usdt), INITIAL_PRICE, MIN_PRICE, mask));
+        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
+        mondeto = Mondeto(address(proxy));
 
         usdt.mint(alice, 1_000_000_000e6);
         usdt.mint(bob, 1_000_000_000e6);
