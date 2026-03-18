@@ -185,6 +185,11 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
 
     // --- Views ---
 
+    /// @notice Returns the full land mask. Pixel ID `n` is land if bit `n % 256` of word `n / 256` is set.
+    function getLandMask() external view returns (uint256[] memory) {
+        return landMask;
+    }
+
     function currentEpoch() public view returns (uint256) {
         return (block.timestamp - deployTimestamp) / HALVING_TIME;
     }
