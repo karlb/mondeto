@@ -198,8 +198,16 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     ///            24-byte record in the output. Consume the next record when isLand is true.
     ///         2. Compute `id = row * WIDTH + col` from the iteration coordinates.
     ///         3. Decode owner (bytes 0–19), saleCount (byte 20), color (bytes 21–23) from the record.
-    ///         4. Compute price separately via priceOf(col, row) or rectanglePrice, since price is
-    ///            not included in the packed data (it depends on block.timestamp).
+    ///         4. Compute price client-side from saleCount (if necessary). Read initialPrice, minPrice,
+    ///            deployTimestamp, and HALVING_TIME once, then for each pixel:
+    ///              elapsed     = block.timestamp - deployTimestamp
+    ///              epochStart  = elapsed / HALVING_TIME
+    ///              remainder   = elapsed - epochStart * HALVING_TIME
+    ///              discreteP(e)= initialPrice << (saleCount - e)   if saleCount >= e
+    ///                          = max(initialPrice >> (e - saleCount), minPrice)  otherwise
+    ///              price       = pStart - (pStart - pEnd) * remainder / HALVING_TIME
+    ///            where pStart = discreteP(epochStart), pEnd = discreteP(epochStart + 1).
+    ///            This avoids per-pixel RPC calls.
     function getPixelBatch(uint16 x, uint16 y, uint16 w, uint16 h) external view returns (bytes memory) {
         if (x + w > WIDTH || y + h > HEIGHT) revert OutOfBounds();
 
