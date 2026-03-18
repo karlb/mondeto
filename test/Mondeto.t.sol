@@ -345,6 +345,77 @@ contract MondetoTest is Test {
         mondeto.setInitialPrice(200_000);
     }
 
+    function test_setFeeRate() public {
+        // Owner sets to 500 (5%)
+        mondeto.setFeeRate(500);
+        assertEq(mondeto.feeRate(), 500);
+
+        // Non-owner reverts with OwnableUnauthorizedAccount
+        vm.prank(alice);
+        vm.expectRevert();
+        mondeto.setFeeRate(100);
+
+        // Above 10000 reverts
+        vm.expectRevert(Mondeto.InvalidFeeRate.selector);
+        mondeto.setFeeRate(10001);
+
+        // Zero is valid
+        mondeto.setFeeRate(0);
+        assertEq(mondeto.feeRate(), 0);
+    }
+
+    function test_feeFlowToTreasury() public {
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = 0;
+
+        // Alice buys unowned pixel → full INITIAL_PRICE to treasury
+        vm.prank(alice);
+        mondeto.buyPixels(ids);
+        assertEq(usdt.balanceOf(address(mondeto)), INITIAL_PRICE);
+
+        // Bob buys from alice: price = INITIAL_PRICE * 2 = 200_000
+        // fee = 200_000 * 300 / 10_000 = 6_000
+        // alice receives 200_000 - 6_000 = 194_000
+        uint256 aliceBalBefore = usdt.balanceOf(alice);
+        vm.prank(bob);
+        mondeto.buyPixels(ids);
+
+        assertEq(usdt.balanceOf(alice) - aliceBalBefore, 194_000);
+        // treasury = INITIAL_PRICE (from first buy) + 6_000 fee
+        assertEq(usdt.balanceOf(address(mondeto)), INITIAL_PRICE + 6_000);
+    }
+
+    function test_buyEmpty() public {
+        uint256[] memory ids = new uint256[](0);
+        vm.prank(alice);
+        mondeto.buyPixels(ids); // should not revert
+    }
+
+    function test_buyDuplicatePixels() public {
+        // Buy pixel 0 twice in a single call: [0, 0]
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = 0;
+        ids[1] = 0;
+
+        uint256 aliceBalBefore = usdt.balanceOf(alice);
+        vm.prank(alice);
+        mondeto.buyPixels(ids);
+
+        // First iteration: unowned → price1 = INITIAL_PRICE, goes to treasury
+        // Second iteration: owned by alice → price2 = INITIAL_PRICE * 2,
+        //   fee = price2 * 300 / 10000, alice receives price2 - fee
+        // Net alice cost: price1 + price2 - (price2 - fee) = price1 + fee
+        uint256 price1 = INITIAL_PRICE;
+        uint256 price2 = INITIAL_PRICE * 2;
+        uint256 fee2 = price2 * 300 / 10000;
+        uint256 netAliceCost = price1 + fee2;
+        assertEq(aliceBalBefore - usdt.balanceOf(alice), netAliceCost);
+
+        // saleCount should be 2
+        (, uint8 saleCount) = mondeto.pixels(0);
+        assertEq(saleCount, 2);
+    }
+
     // ========== Land Mask ==========
 
     function test_landMaskSetCorrectly() public view {
