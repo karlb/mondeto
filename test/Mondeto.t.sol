@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
-import {Test, console} from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {Mondeto} from "../src/Mondeto.sol";
 import {MockUSDT} from "./mocks/MockUSDT.sol";
@@ -424,14 +424,24 @@ contract MondetoTest is Test {
 
     // ========== Fuzz ==========
 
-    function testFuzz_priceNeverReverts(uint8 saleCount, uint64 timeElapsed) public view {
-        // Warp doesn't work in view fuzz tests, so we test _price indirectly via selectionPrice
-        // Just verify the formula doesn't revert for any inputs
-        uint256 epoch = uint256(timeElapsed) / mondeto.HALF_YEAR();
-        // We can't call _price directly, so we test through the contract
+    function testFuzz_priceNeverReverts(uint8 saleCount, uint64 timeElapsed) public {
+        // Buy pixel saleCount times to set its sale count, then warp and check price
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = 0;
 
-        // The price function is internal, but we verify it won't revert by checking
-        // that priceOf doesn't revert for epoch 0 (always safe)
+        // Bound saleCount to something feasible for a loop
+        uint8 buys = uint8(bound(saleCount, 0, 10));
+
+        // Warp far into the future so each buy costs minPrice
+        vm.warp(block.timestamp + 182 days * 300);
+
+        for (uint8 i; i < buys; ++i) {
+            vm.prank(i % 2 == 0 ? alice : bob);
+            mondeto.buyPixels(ids, 0xFF0000, "", "");
+        }
+
+        // Warp to fuzzed time and verify priceOf doesn't revert
+        vm.warp(block.timestamp + uint256(timeElapsed));
         mondeto.priceOf(0, 0);
     }
 

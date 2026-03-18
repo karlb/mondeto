@@ -55,6 +55,8 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
 
     // --- Errors ---
     error InvalidPixelId(uint256 id);
+    error InvalidCoordinates();
+    error OutOfBounds();
     error NotLand(uint256 id);
     error LabelTooLong();
     error UrlTooLong();
@@ -82,8 +84,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         string calldata label,
         string calldata url
     ) external nonReentrant {
-        if (bytes(label).length > 64) revert LabelTooLong();
-        if (bytes(url).length > 64) revert UrlTooLong();
+        _validateProfile(label, url);
 
         uint256 epoch = currentEpoch();
         uint256 totalCost;
@@ -134,26 +135,15 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
 
         // Conditionally update profile
         if (color != 0 || bytes(label).length > 0 || bytes(url).length > 0) {
-            OwnerProfile storage profile = profiles[msg.sender];
-            profile.color = color;
-            profile.label = bytes(label);
-            profile.url = bytes(url);
-            emit ProfileUpdated(msg.sender, color, bytes(label), bytes(url));
+            _setProfile(msg.sender, color, label, url);
         }
 
         emit PixelsPurchased(msg.sender, ids, totalCost);
     }
 
     function updateProfile(uint24 color, string calldata label, string calldata url) external {
-        if (bytes(label).length > 64) revert LabelTooLong();
-        if (bytes(url).length > 64) revert UrlTooLong();
-
-        OwnerProfile storage profile = profiles[msg.sender];
-        profile.color = color;
-        profile.label = bytes(label);
-        profile.url = bytes(url);
-
-        emit ProfileUpdated(msg.sender, color, bytes(label), bytes(url));
+        _validateProfile(label, url);
+        _setProfile(msg.sender, color, label, url);
     }
 
     // --- Views ---
@@ -167,22 +157,24 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     }
 
     function priceOf(uint16 x, uint16 y) external view returns (uint256) {
-        require(x < WIDTH && y < HEIGHT, "Invalid coords");
+        if (x >= WIDTH || y >= HEIGHT) revert InvalidCoordinates();
         uint256 id = pixelId(x, y);
         return _price(pixels[id].saleCount, currentEpoch());
     }
 
     function isLand(uint16 x, uint16 y) external view returns (bool) {
-        require(x < WIDTH && y < HEIGHT, "Invalid coords");
+        if (x >= WIDTH || y >= HEIGHT) revert InvalidCoordinates();
         return _isLand(pixelId(x, y));
     }
 
     function getPixelBatch(uint16 x, uint16 y, uint16 w, uint16 h) external view returns (PixelView[] memory) {
-        require(x + w <= WIDTH && y + h <= HEIGHT, "Out of bounds");
+        if (x + w > WIDTH || y + h > HEIGHT) revert OutOfBounds();
 
         uint256 epoch = currentEpoch();
         PixelView[] memory result = new PixelView[](uint256(w) * h);
         uint256 idx;
+        address cachedOwner;
+        uint24 cachedColor;
 
         for (uint16 row = y; row < y + h; ++row) {
             for (uint16 col = x; col < x + w; ++col) {
@@ -191,7 +183,11 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
                 address owner = px.owner;
                 uint24 color;
                 if (owner != address(0)) {
-                    color = profiles[owner].color;
+                    if (owner != cachedOwner) {
+                        cachedOwner = owner;
+                        cachedColor = profiles[owner].color;
+                    }
+                    color = cachedColor;
                 }
                 result[idx] = PixelView({
                     id: id,
@@ -208,7 +204,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     }
 
     function rectanglePrice(uint16 x, uint16 y, uint16 w, uint16 h) external view returns (uint256) {
-        require(x + w <= WIDTH && y + h <= HEIGHT, "Out of bounds");
+        if (x + w > WIDTH || y + h > HEIGHT) revert OutOfBounds();
 
         uint256 epoch = currentEpoch();
         uint256 total;
@@ -251,6 +247,19 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     }
 
     // --- Internal ---
+
+    function _validateProfile(string calldata label, string calldata url) internal pure {
+        if (bytes(label).length > 64) revert LabelTooLong();
+        if (bytes(url).length > 64) revert UrlTooLong();
+    }
+
+    function _setProfile(address user, uint24 color, string calldata label, string calldata url) internal {
+        OwnerProfile storage profile = profiles[user];
+        profile.color = color;
+        profile.label = bytes(label);
+        profile.url = bytes(url);
+        emit ProfileUpdated(user, color, bytes(label), bytes(url));
+    }
 
     function _price(uint8 saleCount, uint256 epoch) internal view returns (uint256) {
         if (saleCount >= epoch) {
