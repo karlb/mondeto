@@ -383,9 +383,10 @@ contract MondetoTest is Test {
         mondeto.setLandMask(mask);
     }
 
-    function test_getPixelBatchReturnsCorrectLength() public view {
-        bytes memory batch = mondeto.getPixelBatch(0, 0, 3, 1);
-        assertEq(batch.length, 72); // 3 pixels * 24 bytes
+    function test_getPixelBatchSkipsWater() public view {
+        // Batch at (123, 3) width 3: pixels 1023 (land), 1024 (water), 1025 (water)
+        bytes memory batch = mondeto.getPixelBatch(123, 3, 3, 1);
+        assertEq(batch.length, 24); // only 1 land pixel * 24 bytes
     }
 
     // ========== Upgrade ==========

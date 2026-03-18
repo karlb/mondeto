@@ -158,13 +158,21 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         return _isLand(pixelId(x, y));
     }
 
-    /// @notice Returns pixel data for a rectangle. Each pixel is 24 bytes packed:
-    ///         [0:20] owner address, [20:21] saleCount, [21:24] color (uint24 big-endian)
+    /// @notice Returns pixel data for land pixels in a rectangle. Each pixel is 24 bytes packed:
+    ///         [0:20] owner address, [20:21] saleCount, [21:24] color (uint24 big-endian).
+    ///         Water pixels are skipped. Order matches pixelId order (row-major, left-to-right).
     function getPixelBatch(uint16 x, uint16 y, uint16 w, uint16 h) external view returns (bytes memory) {
         if (x + w > WIDTH || y + h > HEIGHT) revert OutOfBounds();
 
-        uint256 count = uint256(w) * h;
-        bytes memory result = new bytes(count * 24);
+        // Count land pixels to allocate exact size
+        uint256 landCount;
+        for (uint16 row = y; row < y + h; ++row) {
+            for (uint16 col = x; col < x + w; ++col) {
+                if (_isLand(pixelId(col, row))) landCount++;
+            }
+        }
+
+        bytes memory result = new bytes(landCount * 24);
         uint256 offset;
         address cachedOwner;
         uint24 cachedColor;
@@ -172,6 +180,8 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         for (uint16 row = y; row < y + h; ++row) {
             for (uint16 col = x; col < x + w; ++col) {
                 uint256 id = pixelId(col, row);
+                if (!_isLand(id)) continue;
+
                 PixelData storage px = pixels[id];
                 address owner = px.owner;
                 uint8 sc = px.saleCount;
@@ -185,7 +195,6 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
                 }
                 assembly {
                     let ptr := add(add(result, 32), offset)
-                    // Pack: 20-byte address | 1-byte saleCount | 3-byte color
                     mstore(ptr, shl(96, owner))
                     mstore8(add(ptr, 20), sc)
                     mstore8(add(ptr, 21), shr(16, color))
