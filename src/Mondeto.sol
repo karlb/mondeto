@@ -180,6 +180,19 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         return _isLand(pixelId(x, y));
     }
 
+    /// @notice Returns all contract constants and config needed for client-side rendering and
+    ///         price computation in a single RPC call.
+    function config() external view returns (
+        uint16 width,
+        uint16 height,
+        uint256 halvingTime,
+        uint256 _initialPrice,
+        uint256 _minPrice,
+        uint256 _deployTimestamp
+    ) {
+        return (WIDTH, HEIGHT, HALVING_TIME, initialPrice, minPrice, deployTimestamp);
+    }
+
     /// @notice Returns packed pixel data for land pixels in a rectangle. Water pixels are skipped.
     ///         Each land pixel is encoded as 24 bytes, concatenated in pixelId order (row-major,
     ///         left-to-right, top-to-bottom):
@@ -198,8 +211,8 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     ///            24-byte record in the output. Consume the next record when isLand is true.
     ///         2. Compute `id = row * WIDTH + col` from the iteration coordinates.
     ///         3. Decode owner (bytes 0–19), saleCount (byte 20), color (bytes 21–23) from the record.
-    ///         4. Compute price client-side from saleCount (if necessary). Read initialPrice, minPrice,
-    ///            deployTimestamp, and HALVING_TIME once, then for each pixel:
+    ///         4. Compute price client-side from saleCount (if necessary). Call config() once to get
+    ///            initialPrice, minPrice, deployTimestamp, and HALVING_TIME, then for each pixel:
     ///              elapsed     = block.timestamp - deployTimestamp
     ///              epochStart  = elapsed / HALVING_TIME
     ///              remainder   = elapsed - epochStart * HALVING_TIME
