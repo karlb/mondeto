@@ -3,9 +3,9 @@
 Convert world_map_bw.png to a bitmask for the Mondeto smart contract.
 
 Land (black pixels) = 1, Water (white pixels) = 0.
-Outputs 235 uint256 values covering 60,000 pixels (300x200).
+Dimensions and word count are derived from the image.
 
-Pixel ID = y * 300 + x, matching the contract's pixelId() function.
+Pixel ID = y * width + x, matching the contract's pixelId() function.
 """
 
 import json
@@ -15,29 +15,24 @@ from pathlib import Path
 try:
     from PIL import Image
 except ImportError:
-    print("Error: Pillow is required. Install with: pip install Pillow", file=sys.stderr)
+    print("Error: Pillow is required. Install with: uv run --with Pillow", file=sys.stderr)
     sys.exit(1)
 
-WIDTH = 300
-HEIGHT = 200
-TOTAL_PIXELS = WIDTH * HEIGHT
-WORDS = 235  # ceil(60000 / 256)
 THRESHOLD = 128  # below this = land (black), above = water (white)
 
 
-def generate_land_mask(image_path: str) -> list[int]:
+def generate_land_mask(image_path: str) -> tuple[int, int, list[int]]:
     img = Image.open(image_path).convert("L")  # grayscale
-
-    # Resize to 300x200 if needed
-    if img.size != (WIDTH, HEIGHT):
-        img = img.resize((WIDTH, HEIGHT), Image.LANCZOS)
+    width, height = img.size
+    total_pixels = width * height
+    words = (total_pixels + 255) // 256
 
     pixels = img.load()
-    mask = [0] * WORDS
+    mask = [0] * words
 
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
-            pixel_id = y * WIDTH + x
+    for y in range(height):
+        for x in range(width):
+            pixel_id = y * width + x
             brightness = pixels[x, y]
 
             if brightness < THRESHOLD:  # black = land
@@ -45,7 +40,7 @@ def generate_land_mask(image_path: str) -> list[int]:
                 bit_index = pixel_id % 256
                 mask[word_index] |= 1 << bit_index
 
-    return mask
+    return width, height, mask
 
 
 def main():
@@ -56,11 +51,13 @@ def main():
         print(f"Error: {image_path} not found", file=sys.stderr)
         sys.exit(1)
 
-    mask = generate_land_mask(str(image_path))
+    width, height, mask = generate_land_mask(str(image_path))
+    total_pixels = width * height
 
     # Count land pixels
     land_count = sum(bin(w).count("1") for w in mask)
-    print(f"Land pixels: {land_count} / {TOTAL_PIXELS}", file=sys.stderr)
+    print(f"Image: {width}x{height} ({total_pixels} pixels, {len(mask)} words)", file=sys.stderr)
+    print(f"Land pixels: {land_count} / {total_pixels}", file=sys.stderr)
 
     # Output as JSON array of hex strings (for easy use in deploy scripts)
     hex_values = [hex(w) for w in mask]
