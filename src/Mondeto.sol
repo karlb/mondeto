@@ -105,10 +105,23 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         uint256[] memory amounts = new uint256[](ids.length);
         uint256 recipientCount;
 
-        for (uint256 i; i < ids.length; ++i) {
+        // Cache landMask word to avoid repeated SLOADs for consecutive pixel IDs
+        uint256 cachedWordIdx = type(uint256).max;
+        uint256 cachedWord;
+
+        for (uint256 i; i < ids.length;) {
             uint256 id = ids[i];
             if (id >= TOTAL_PIXELS) revert InvalidPixelId(id);
-            if (!_isLand(id)) revert NotLand(id);
+
+            {
+                // Inline _isLand with word caching
+                uint256 wordIdx = id >> 8;
+                if (wordIdx != cachedWordIdx) {
+                    cachedWordIdx = wordIdx;
+                    cachedWord = landMask[wordIdx];
+                }
+                if (cachedWord & (1 << (id & 255)) == 0) revert NotLand(id);
+            }
 
             PixelData storage px = pixels[id];
             uint256 price = _price(px.saleCount, elapsed);
@@ -137,11 +150,14 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
             if (px.saleCount < 255) {
                 px.saleCount++;
             }
+
+            unchecked { ++i; }
         }
 
         // Execute transfers
-        for (uint256 i; i < recipientCount; ++i) {
+        for (uint256 i; i < recipientCount;) {
             usdt.safeTransferFrom(msg.sender, recipients[i], amounts[i]);
+            unchecked { ++i; }
         }
 
         // Conditionally update profile
@@ -184,46 +200,59 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     function getPixelBatch(uint16 x, uint16 y, uint16 w, uint16 h) external view returns (bytes memory) {
         if (x + w > WIDTH || y + h > HEIGHT) revert OutOfBounds();
 
-        // Count land pixels to allocate exact size
-        uint256 landCount;
-        for (uint16 row = y; row < y + h; ++row) {
-            for (uint16 col = x; col < x + w; ++col) {
-                if (_isLand(pixelId(col, row))) landCount++;
-            }
-        }
-
-        bytes memory result = new bytes(landCount * 24);
+        // Over-allocate for max possible pixels, trim after filling
+        bytes memory result = new bytes(uint256(w) * h * 24);
         uint256 offset;
         address cachedOwner;
         uint24 cachedColor;
 
-        for (uint16 row = y; row < y + h; ++row) {
-            for (uint16 col = x; col < x + w; ++col) {
-                uint256 id = pixelId(col, row);
-                if (!_isLand(id)) continue;
+        // Cache landMask word to avoid repeated SLOADs for consecutive pixels
+        uint256 cachedWordIdx = type(uint256).max;
+        uint256 cachedWord;
 
-                PixelData storage px = pixels[id];
-                address owner = px.owner;
-                uint8 sc = px.saleCount;
-                uint24 color;
-                if (owner != address(0)) {
-                    if (owner != cachedOwner) {
-                        cachedOwner = owner;
-                        cachedColor = profiles[owner].color;
+        for (uint256 row = y; row < uint256(y) + h;) {
+            uint256 rowBase = row * WIDTH;
+            for (uint256 col = x; col < uint256(x) + w;) {
+                uint256 id = rowBase + col;
+
+                {
+                    // Inline _isLand with word caching
+                    uint256 wordIdx = id >> 8;
+                    if (wordIdx != cachedWordIdx) {
+                        cachedWordIdx = wordIdx;
+                        cachedWord = landMask[wordIdx];
                     }
-                    color = cachedColor;
+                    if (cachedWord & (1 << (id & 255)) == 0) {
+                        unchecked { ++col; }
+                        continue;
+                    }
                 }
-                assembly {
-                    let ptr := add(add(result, 32), offset)
-                    mstore(ptr, shl(96, owner))
-                    mstore8(add(ptr, 20), sc)
-                    mstore8(add(ptr, 21), shr(16, color))
-                    mstore8(add(ptr, 22), shr(8, color))
-                    mstore8(add(ptr, 23), color)
+
+                {
+                    PixelData storage px = pixels[id];
+                    address owner = px.owner;
+                    uint8 sc = px.saleCount;
+                    uint24 clr;
+                    if (owner != address(0)) {
+                        if (owner != cachedOwner) {
+                            cachedOwner = owner;
+                            cachedColor = profiles[owner].color;
+                        }
+                        clr = cachedColor;
+                    }
+                    assembly {
+                        let ptr := add(add(result, 32), offset)
+                        mstore(ptr, or(or(shl(96, owner), shl(88, sc)), shl(64, clr)))
+                    }
+                    offset += 24;
                 }
-                offset += 24;
+                unchecked { ++col; }
             }
+            unchecked { ++row; }
         }
+
+        // Trim to actual size
+        assembly { mstore(result, offset) }
         return result;
     }
 
