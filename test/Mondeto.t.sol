@@ -486,13 +486,14 @@ contract MondetoTest is Test {
         // Warp far into the future so price is minPrice regardless of saleCount
         vm.warp(block.timestamp + 182 days * 300);
 
-        // Buy 5 times alternating alice and bob
-        for (uint256 i; i < 5; ++i) {
+        // Buy 256 times alternating alice and bob
+        for (uint256 i; i < 256; ++i) {
             vm.prank(i % 2 == 0 ? alice : bob);
             mondeto.buyPixels(ids, 0xFF0000, "", "");
         }
 
+        // saleCount should saturate at 255, not wrap to 0
         (, uint8 saleCount) = mondeto.pixels(0);
-        assertEq(saleCount, 5);
+        assertEq(saleCount, 255);
     }
 }

@@ -82,9 +82,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         initialPrice = _initialPrice;
         minPrice = _minPrice;
 
-        for (uint256 i; i < _landMask.length; ++i) {
-            landMask.push(_landMask[i]);
-        }
+        landMask = _landMask;
     }
 
     // --- Core ---
@@ -124,7 +122,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
             }
 
             PixelData storage px = pixels[id];
-            uint256 price = _price(px.saleCount, elapsed);
+            uint256 price = _price(px.saleCount, elapsed, initialPrice, minPrice);
             totalCost += price;
 
             address prevOwner = px.owner;
@@ -186,7 +184,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     function priceOf(uint16 x, uint16 y) external view returns (uint256) {
         if (x >= WIDTH || y >= HEIGHT) revert InvalidCoordinates();
         uint256 id = pixelId(x, y);
-        return _price(pixels[id].saleCount, block.timestamp - deployTimestamp);
+        return _price(pixels[id].saleCount, block.timestamp - deployTimestamp, initialPrice, minPrice);
     }
 
     function isLand(uint16 x, uint16 y) external view returns (bool) {
@@ -260,23 +258,42 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         if (x + w > WIDTH || y + h > HEIGHT) revert OutOfBounds();
 
         uint256 elapsed = block.timestamp - deployTimestamp;
+        uint256 _initialPrice = initialPrice;
+        uint256 _minPrice = minPrice;
         uint256 total;
 
-        for (uint16 row = y; row < y + h; ++row) {
-            for (uint16 col = x; col < x + w; ++col) {
-                uint256 id = pixelId(col, row);
-                total += _price(pixels[id].saleCount, elapsed);
+        uint256 cachedWordIdx = type(uint256).max;
+        uint256 cachedWord;
+
+        for (uint256 row = y; row < uint256(y) + h;) {
+            uint256 id = row * WIDTH + x;
+            for (uint256 col; col < w;) {
+                // Inline _isLand with word caching — skip water pixels
+                uint256 wordIdx = id >> 8;
+                if (wordIdx != cachedWordIdx) {
+                    cachedWordIdx = wordIdx;
+                    cachedWord = landMask[wordIdx];
+                }
+                if (cachedWord & (1 << (id & 255)) != 0) {
+                    total += _price(pixels[id].saleCount, elapsed, _initialPrice, _minPrice);
+                }
+                unchecked { ++id; ++col; }
             }
+            unchecked { ++row; }
         }
         return total;
     }
 
     function selectionPrice(uint256[] calldata ids) external view returns (uint256) {
         uint256 elapsed = block.timestamp - deployTimestamp;
+        uint256 _initialPrice = initialPrice;
+        uint256 _minPrice = minPrice;
         uint256 total;
         for (uint256 i; i < ids.length; ++i) {
-            if (ids[i] >= TOTAL_PIXELS) revert InvalidPixelId(ids[i]);
-            total += _price(pixels[ids[i]].saleCount, elapsed);
+            uint256 id = ids[i];
+            if (id >= TOTAL_PIXELS) revert InvalidPixelId(id);
+            if (!_isLand(id)) revert NotLand(id);
+            total += _price(pixels[id].saleCount, elapsed, _initialPrice, _minPrice);
         }
         return total;
     }
@@ -306,30 +323,30 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         emit ProfileUpdated(user, color, bytes(label), bytes(url));
     }
 
-    function _price(uint8 saleCount, uint256 elapsed) internal view returns (uint256) {
+    function _price(uint8 saleCount, uint256 elapsed, uint256 _initialPrice, uint256 _minPrice) internal pure returns (uint256) {
         uint256 epochStart = elapsed / HALVING_TIME;
-        uint256 remainder = elapsed % HALVING_TIME;
+        uint256 remainder = elapsed - epochStart * HALVING_TIME;
 
-        uint256 pStart = _discretePrice(saleCount, epochStart);
+        uint256 pStart = _discretePrice(saleCount, epochStart, _initialPrice, _minPrice);
         if (remainder == 0) return pStart;
         if (pStart == type(uint256).max) return type(uint256).max;
 
-        uint256 pEnd = _discretePrice(saleCount, epochStart + 1);
+        uint256 pEnd = _discretePrice(saleCount, epochStart + 1, _initialPrice, _minPrice);
 
         // Linear interpolation between adjacent power-of-2 price levels
         return pStart - (pStart - pEnd) * remainder / HALVING_TIME;
     }
 
-    function _discretePrice(uint8 saleCount, uint256 epoch) internal view returns (uint256) {
+    function _discretePrice(uint8 saleCount, uint256 epoch, uint256 _initialPrice, uint256 _minPrice) internal pure returns (uint256) {
         if (saleCount >= epoch) {
             uint256 shift = saleCount - epoch;
             if (shift >= 128) return type(uint256).max;
-            return initialPrice << shift;
+            return _initialPrice << shift;
         } else {
             uint256 shift = epoch - saleCount;
-            if (shift >= 128) return minPrice;
-            uint256 p = initialPrice >> shift;
-            return p < minPrice ? minPrice : p;
+            if (shift >= 128) return _minPrice;
+            uint256 p = _initialPrice >> shift;
+            return p < _minPrice ? _minPrice : p;
         }
     }
 
