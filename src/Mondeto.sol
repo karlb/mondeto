@@ -192,9 +192,26 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
         return _isLand(pixelId(x, y));
     }
 
-    /// @notice Returns pixel data for land pixels in a rectangle. Each pixel is 24 bytes packed:
-    ///         [0:20] owner address, [20:21] saleCount, [21:24] color (uint24 big-endian).
-    ///         Water pixels are skipped. Order matches pixelId order (row-major, left-to-right).
+    /// @notice Returns packed pixel data for land pixels in a rectangle. Water pixels are skipped.
+    ///         Each land pixel is encoded as 24 bytes, concatenated in pixelId order (row-major,
+    ///         left-to-right, top-to-bottom):
+    ///
+    ///           Byte range   Field       Type
+    ///           ──────────   ─────       ────
+    ///           [0:20]       owner       address
+    ///           [20:21]      saleCount   uint8
+    ///           [21:24]      color       uint24 (big-endian)
+    ///
+    ///         To build a full PixelView struct {id, owner, saleCount, price, color, isLand} from
+    ///         this data, the caller must:
+    ///
+    ///         1. Iterate the rectangle in the same row-major order (row = y..y+h, col = x..x+w),
+    ///            calling isLand(col, row) for each position. Only land pixels have a corresponding
+    ///            24-byte record in the output. Consume the next record when isLand is true.
+    ///         2. Compute `id = row * WIDTH + col` from the iteration coordinates.
+    ///         3. Decode owner (bytes 0–19), saleCount (byte 20), color (bytes 21–23) from the record.
+    ///         4. Compute price separately via priceOf(col, row) or rectanglePrice, since price is
+    ///            not included in the packed data (it depends on block.timestamp).
     function getPixelBatch(uint16 x, uint16 y, uint16 w, uint16 h) external view returns (bytes memory) {
         if (x + w > WIDTH || y + h > HEIGHT) revert OutOfBounds();
 
