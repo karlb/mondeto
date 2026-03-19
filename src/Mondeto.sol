@@ -11,7 +11,7 @@ contract Mondeto is UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // --- Constants ---
-    uint256 public constant HALVING_TIME = 182 days;
+    uint256 public constant HALVING_TIME = 30 days;
     uint256 public constant DEFAULT_FEE_RATE = 300; // 3% in basis points
 
     // --- Immutables (set in constructor, baked into implementation bytecode) ---
