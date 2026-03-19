@@ -80,6 +80,38 @@ def decode_bytes(raw_hex: str) -> bytes:
     return bytes.fromhex(h[128 : 128 + length * 2])
 
 
+def parse_profile_label(cast_output: str) -> str:
+    """Parse label from cast's decoded profiles() output.
+
+    cast returns 3 lines: color (decimal), label (0x hex), url (0x hex).
+    """
+    lines = cast_output.strip().splitlines()
+    if len(lines) < 2:
+        return ""
+    label_hex = _strip_0x(lines[1].strip())
+    if not label_hex:
+        return ""
+    return bytes.fromhex(label_hex).decode("utf-8", errors="replace")
+
+
+def resolve_label(proxy: str, addr: str) -> str:
+    """Return profile label for addr, or empty string."""
+    if addr == ZERO:
+        return ""
+    try:
+        raw = cast_call(proxy, "profiles(address)(uint24,bytes,bytes)", [addr])
+        return parse_profile_label(raw)
+    except subprocess.CalledProcessError:
+        return ""
+
+
+def fmt_addr(addr: str, label: str) -> str:
+    """Format address with label if available."""
+    if label:
+        return f"{addr}  ({label})"
+    return addr
+
+
 # ---------------------------------------------------------------------------
 # Read contract state
 # ---------------------------------------------------------------------------
@@ -284,11 +316,15 @@ def main() -> None:
         cfg["initialPrice"], cfg["minPrice"], cfg["halvingTime"],
     )
 
+    print("Resolving player profiles...")
+    winner_addrs = {area_addr, empire_addr, tycoon_addr} - {ZERO}
+    labels = {a: resolve_label(proxy, a) for a in winner_addrs}
+
     print()
     print("=== Leaderboard Winners ===")
-    print(f"  Area:    {area_addr}  ({area_val} px)")
-    print(f"  Empire:  {empire_addr}  ({empire_val} px)")
-    print(f"  Tycoon:  {tycoon_addr}  ({tycoon_val / 1e6:.2f} USDT)")
+    print(f"  Area:    {fmt_addr(area_addr, labels.get(area_addr, ''))}  ({area_val} px)")
+    print(f"  Empire:  {fmt_addr(empire_addr, labels.get(empire_addr, ''))}  ({empire_val} px)")
+    print(f"  Tycoon:  {fmt_addr(tycoon_addr, labels.get(tycoon_addr, ''))}  ({tycoon_val / 1e6:.2f} USDT)")
     print(f"  Reward:  {reward} ({reward / 1e6:.2f} USDT each)")
     print()
 
@@ -313,7 +349,9 @@ def main() -> None:
         if addr == ZERO:
             print(f"  Skipping {label}: no winner")
             continue
-        print(f"  Paying {label} winner {addr} (nonce {nonce})...")
+        name = labels.get(addr, "")
+        display = fmt_addr(addr, name)
+        print(f"  Paying {label} winner {display} (nonce {nonce})...")
         subprocess.run(
             [
                 "cast", "send", usdt,
