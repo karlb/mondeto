@@ -15,7 +15,6 @@ Writes:
 import argparse
 import json
 import os
-import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -55,20 +54,6 @@ USDT_ABI = [
 ]
 
 
-def read_env(path: Path) -> dict[str, str]:
-    env = {}
-    if not path.exists():
-        return env
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        # handle `export KEY=VALUE` and `KEY=VALUE`
-        m = re.match(r"^(?:export\s+)?(\w+)=(.+?)(?:\s+#.*)?$", line)
-        if m:
-            env[m.group(1)] = m.group(2).strip("'\"")
-    return env
-
 
 def main():
     parser = argparse.ArgumentParser(description="Export Mondeto ABI to TypeScript")
@@ -83,9 +68,9 @@ def main():
     abi = artifact["abi"]
 
     # Read proxy address from latest Deploy broadcast (transactions[1] is the ERC1967Proxy)
-    # Read USDT address from .env
-    env = read_env(ROOT / ".env")
-    usdt = env.get("USDT_ADDRESS", "0x" + "0" * 40)
+    usdt = os.environ.get("USDT_ADDRESS", "")
+    if not usdt:
+        raise SystemExit("USDT_ADDRESS environment variable must be set")
     broadcast_glob = sorted((ROOT / "broadcast" / "Deploy.s.sol").glob("*/run-latest.json"))
     if broadcast_glob:
         broadcast = json.loads(broadcast_glob[-1].read_text())
